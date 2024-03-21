@@ -28,6 +28,35 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
     sp_consenus::DefaultImportQueue<Block, FullClient>,
     sc_transaction_pool::FullPool<Block, FullClient>,
     (
-
+        sc_consensus_aura::AuraBlockImport<
+            Block,
+            FullClient,
+            sc_finality_grandpa::GrandpaBlockImport<FullBackend, Block, FullClient, FullSelectChain>,
+            AuraPair
+        >,
+        sc_finality_grandpa::LinkHalf<Block, FullClient, FullSelectChain>,
     )
->>
+>, ServiceError> {
+    if config.keystore_remote.is_some() {
+        return Err(ServiceError::Other(format!("Remote Keystores are not supported.")))
+    }
+
+    let inherent_data_providers = InherentDataProviders::new();
+    let (client, backend, keystore_container, task_manager) = sc_service::new_full_parts::<Block, RuntimeApi, Executor>(&config)?;
+    let client = Arc::new(client);
+    let select_chain = sc_consensus::LongestChain::new(backend.clone());
+    let transaction_pool = sc_transaction_pool::BasicPool::new_full(
+        config.transaction_pool.clone(),
+        config.role.is_authority().into(),
+        config.prometheus_registry(),
+        task_manager.spawn_handle(),
+        client.clone(),
+    );
+    let (grandpa_block_import, grandpa_link) = sc_finality_grandpa::block_import(
+        client.clone(),
+        &(client.clone() as Arc<_>),
+        select_chain.clone(),
+    )?;
+    let aura_block_import = sc_consensus_aura::AuraBlockImport::<_, _, _, AuraPair>::new(grandpa_block_import.clone(), client.clone(),);
+
+}
